@@ -295,6 +295,214 @@ S_g(r) = \text{List}(s \in r \mid \rho(s) = g)
 y el conjunto de regiones presentes $R(r) = \{\rho(s) \mid s \in r\}$.
 
 ---
+## Punto 2: agrupar con mapas
+
+Este punto usa la notación común. Resume el registro por región con tres
+funciones: `porRegion`, `conteoPorRegion` y `magnitudMaxima`.
+
+### 2.1 Especificación
+
+Para un registro $r$, el enunciado pide:
+
+```math
+\text{porRegion}(r) = \{\, g \mapsto S_g(r) \mid g \in R(r) \,\}
+```
+
+```math
+\text{conteoPorRegion}(r) = \{\, g \mapsto \text{len}(S_g(r)) \mid g \in R(r) \,\}
+```
+
+```math
+\text{magnitudMaxima}(r) = \{\, g \mapsto \max\{\mu(s) \mid s \in S_g(r)\} \mid g \in R(r) \,\}
+```
+
+Las llaves de cada mapa son exactamente las regiones que aparecen en $r$.
+Una región que no está en el registro no aparece, y para $r = \text{List}()$
+los tres mapas son $\text{Map}()$. En `porRegion`, los sismos de cada lista
+quedan en el mismo orden en que aparecen en $r$.
+
+### 2.2 El programa
+
+```scala
+def porRegion(r: Registro): Map[String, List[Sismo]] =
+  r.foldLeft(Map[String, List[Sismo]]()) { (mapa, sismo) =>
+    mapa + (sismo.region -> (mapa.getOrElse(sismo.region, List()) :+ sismo))
+  }
+
+def conteoPorRegion(r: Registro): Map[String, Int] = {
+  val grupos = porRegion(r)
+  grupos.map { case (region, sismos) =>
+    (region, sismos.length)
+  }
+}
+
+def magnitudMaxima(r: Registro): Map[String, Double] = {
+  val grupos = porRegion(r)
+  grupos.map { case (region, sismos) =>
+    val magnitudes = sismos.map(sismo => sismo.magnitud)
+    (region, magnitudes.max)
+  }
+}
+```
+
+### 2.3 Corrección de `porRegion`
+
+`foldLeft` es un proceso iterativo: va sismo por sismo y guarda lo que lleva
+armado en un mapa. Se argumenta como un programa iterativo, con estado,
+invariante y transformación. Sea $r = \text{List}(s_1, \ldots, s_n)$ y
+$p_i = \text{List}(s_1, \ldots, s_{i-1})$ los sismos que ya se procesaron.
+
+**Hecho útil.** Sea $p$ una lista y $s$ un sismo con región $g_0 = \rho(s)$.
+Al agregar $s$ al final de $p$:
+
+```math
+S_g(p \mathbin{:+} s) = \begin{cases} S_g(p) \mathbin{:+} s & \text{si } g = g_0 \\ S_g(p) & \text{si } g \neq g_0 \end{cases}
+\qquad R(p \mathbin{:+} s) = R(p) \cup \{g_0\}
+```
+
+Esto pasa porque filtrar por la región $g$ solo deja pasar a $s$ cuando
+$\rho(s) = g$, y $s$ queda de último.
+
+**El proceso iterativo.**
+
+- Un estado $e = (m, l)$: $m$ es el mapa armado hasta ahora y
+  $l = \text{List}(s_i, \ldots, s_n)$ son los sismos que faltan.
+- El estado inicial es $e_0 = (\text{Map}(), r)$.
+- El estado es final si $l$ es vacía.
+- La invariante es:
+
+```math
+\text{Inv}(m, l) \equiv l = \text{List}(s_i, \ldots, s_n) \land \text{llaves}(m) = R(p_i) \land \forall g \in R(p_i) : m(g) = S_g(p_i)
+```
+
+- $\text{transformar}((m, l)) = (m', l.\text{tail})$, donde, con
+  $g_0 = \rho(s_i)$ y $s_i = l.\text{head}$:
+
+```math
+m' = m + \bigl(g_0 \mapsto m.\text{getOrElse}(g_0, \text{List}()) \mathbin{:+} s_i\bigr)
+```
+
+**Demostración.**
+
+**1.** $\text{Inv}(e_0)$. Aquí $i = 1$ y $p_1 = \text{List}()$, así que
+$R(p_1) = \emptyset$. El mapa $\text{Map}()$ no tiene llaves y no hay nada
+más que cumplir. Además $l = r$.
+
+**2.** La invariante se mantiene. Se supone $\text{Inv}(m, l)$ y
+$l \neq \text{List}()$. Sea $g_0 = \rho(s_i)$ y $p_{i+1} = p_i \mathbin{:+} s_i$.
+
+- Si $g \neq g_0$: $m'(g) = m(g)$, porque $m'$ solo cambia la llave $g_0$.
+  Por la invariante $m(g) = S_g(p_i)$, y por el hecho útil
+  $S_g(p_i) = S_g(p_{i+1})$.
+- Si $g_0 \in R(p_i)$: por la invariante $m(g_0) = S_{g_0}(p_i)$, y
+  $\text{getOrElse}$ devuelve esa lista. Entonces
+  $m'(g_0) = S_{g_0}(p_i) \mathbin{:+} s_i = S_{g_0}(p_{i+1})$.
+- Si $g_0 \notin R(p_i)$: no hay llave $g_0$, $\text{getOrElse}$ devuelve
+  $\text{List}()$ y $m'(g_0) = \text{List}(s_i)$. Como $S_{g_0}(p_i)$ es vacía,
+  $S_{g_0}(p_{i+1}) = \text{List}(s_i)$.
+- Las llaves de $m'$ son las de $m$ más $g_0$, es decir
+  $R(p_i) \cup \{g_0\} = R(p_{i+1})$. Además
+  $l.\text{tail} = \text{List}(s_{i+1}, \ldots, s_n)$.
+
+Por lo tanto $\text{Inv}(m', l.\text{tail})$.
+
+**3.** $\text{Inv}(e_f) \rightarrow \text{respuesta}(e_f) == f(r)$. En el estado
+final $l$ es vacía, así que $i = n + 1$ y $p_{n+1} = r$. La invariante dice
+que las llaves de $m$ son $R(r)$ y que $m(g) = S_g(r)$. Eso es
+$\text{porRegion}(r)$ según la especificación.
+
+**4.** En cada paso $l$ pierde un elemento (`l.tail`). Después de $n$ pasos
+queda vacía, así que siempre se llega al estado final.
+
+**Teorema 2.1.** Para todo registro $r$,
+$\text{porRegion}(r) = \{\, g \mapsto S_g(r) \mid g \in R(r) \,\}$.
+$\blacksquare$
+
+Con $r = \text{List}()$ el resultado es $\text{Map}()$. Una región ausente no
+tiene llave, porque solo se agrega la región del sismo que se está procesando.
+
+### 2.4 Corrección de `conteoPorRegion`
+
+**Teorema 2.2.** Para todo registro $r$,
+$\text{conteoPorRegion}(r) = \{\, g \mapsto \text{len}(S_g(r)) \mid g \in R(r) \,\}$.
+
+_Demostración._
+
+1. Por el Teorema 2.1, `grupos` tiene un par $(g, S_g(r))$ por cada
+   $g \in R(r)$, y las llaves son distintas.
+2. `map` sobre un mapa aplica la función a cada par. Aquí devuelve
+   $(g, \text{len}(S_g(r)))$, que conserva la llave. Como las llaves de entrada
+   eran distintas, las de salida también, y ninguna entrada pisa a otra.
+3. `sismos.length` es $\text{len}(S_g(r))$, el valor pedido.
+4. Para $r = \text{List}()$, `grupos` es $\text{Map}()$. `map` no visita ninguna
+   entrada y devuelve $\text{Map}()$. $\blacksquare$
+
+### 2.5 Corrección de `magnitudMaxima`
+
+**Teorema 2.3.** Para todo registro $r$,
+$\text{magnitudMaxima}(r) = \{\, g \mapsto \max\{\mu(s) \mid s \in S_g(r)\} \mid g \in R(r) \,\}$.
+
+_Demostración._
+
+1. Por el Teorema 2.1, `grupos` tiene un par $(g, S_g(r))$ por cada
+   $g \in R(r)$.
+2. Si $g \in R(r)$, existe un sismo $s \in r$ con $\rho(s) = g$, así que
+   $s \in S_g(r)$ y la lista no es vacía. Por eso `max` está definido y no
+   lanza excepción.
+3. `sismos.map(sismo => sismo.magnitud)` aplica $\mu$ a cada sismo y da la
+   lista $\text{List}(\mu(s) \mid s \in S_g(r))$.
+4. `max` de una lista no vacía devuelve su mayor elemento. Es el mismo
+   argumento del ejemplo "el máximo de una lista" de la sección 1. Entonces el
+   valor es $M_g = \max\{\mu(s) \mid s \in S_g(r)\}$.
+5. La función del `map` devuelve $(g, M_g)$, que conserva la llave, igual que
+   en el Teorema 2.2. Para $r = \text{List}()$ el resultado es $\text{Map}()$.
+   $\blacksquare$
+
+Comprobación con `registro`:
+
+| Región | $S_g$ (magnitudes) | $\text{len}(S_g)$ | $M_g$ |
+|---|---|:---:|:---:|
+| Valle | 4.2, 3.8, 5.3 | 3 | 5.3 |
+| Santander | 5.1, 4.7 | 2 | 5.1 |
+| Choco | 6.0, 3.1 | 2 | 6.0 |
+
+que coincide con los resultados del enunciado.
+
+### 2.6 El resultado no depende del orden de recorrido
+
+**Teorema 2.4.** Si $r'$ es una permutación de $r$ (los mismos sismos, en otro
+orden), entonces:
+
+```math
+\text{conteoPorRegion}(r') = \text{conteoPorRegion}(r)
+\qquad
+\text{magnitudMaxima}(r') = \text{magnitudMaxima}(r)
+```
+
+_Demostración._
+
+1. $R(r') = R(r)$: ambos conjuntos contienen las regiones de los mismos
+   sismos. Las llaves de los mapas coinciden.
+2. Para cada región $g$, $S_g(r')$ es una permutación de $S_g(r)$, porque
+   filtrar por región selecciona los mismos sismos. Una permutación no cambia
+   la longitud, así que $\text{len}(S_g(r')) = \text{len}(S_g(r))$.
+3. El máximo no depende del orden. La operación $\max$ es conmutativa
+   ($\max(a,b) = \max(b,a)$) y asociativa
+   ($\max(\max(a,b),c) = \max(a,\max(b,c))$), así que cualquier forma de
+   combinar las magnitudes da el mismo valor: el único que es mayor o igual
+   que todos los demás. Entonces $M_g(r') = M_g(r)$.
+4. Dos mapas son iguales cuando tienen las mismas llaves y el mismo valor para
+   cada llave. El orden interno de las entradas no cuenta. Por 1, 2 y 3, todas
+   las entradas coinciden. $\blacksquare$
+
+**`porRegion`.** Tiene las mismas llaves y cada región recibe los mismos
+sismos. Lo único que cambia es el orden dentro de cada lista, porque por el
+Teorema 2.1 ese orden es el que tienen los sismos en el registro. Esa es
+exactamente la especificación, y por eso el conteo y el máximo, que no miran
+ese orden, no cambian. La prueba `propia punto 2: el resultado no cambia si el
+registro se recorre al revés` comprueba esto con `reverse`.
+
+---
 
 ## Punto 4: réplicas perezosas
 
