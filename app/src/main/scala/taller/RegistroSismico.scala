@@ -46,7 +46,9 @@ class RegistroSismico {
   // Punto 2: agrupar con mapas --------------------------------------------------
 
   def porRegion(r: Registro): Map[String, List[Sismo]] =
-    r.groupBy(sismo => sismo.region)
+    r.foldLeft(Map[String, List[Sismo]]()) { (mapa, sismo) =>
+      mapa + (sismo.region -> (mapa.getOrElse(sismo.region, List()) :+ sismo))
+    }
 
   def conteoPorRegion(r: Registro): Map[String, Int] = {
     val grupos = porRegion(r)
