@@ -563,3 +563,321 @@ orden).
 
 Esto es lo que garantiza que `groupBy` y los pliegues internos (`length`,
 `max`) puedan recorrer el registro en cualquier orden sin cambiar el informe.
+# Informe de corrección
+
+Fundamentos de Programación Funcional y Concurrente.
+Taller 3: consultas sobre un registro sísmico.
+
+## Notación común
+
+Un sismo es $s = (f, \rho, \mu, p)$ con región $\rho(s)$ y magnitud $\mu(s)$.
+Un registro es una lista $r = \text{List}(s_1, \ldots, s_n)$, y se define
+recursivamente: el registro vacío $\text{List}()$ es el caso base, y
+$s :: r'$ es el registro que añade el sismo $s$ al frente de $r'$.
+
+Para una región $g$, se define el sub-registro de esa región:
+
+```math
+S_g(r) = \text{List}(s \in r \mid \rho(s) = g)
+```
+
+y el conjunto de regiones presentes $R(r) = \{\rho(s) \mid s \in r\}$.
+
+Las operaciones de lista que usa el compilador al traducir un `for` cumplen
+estas ecuaciones (son su definición):
+
+```math
+\text{filtrar}_p(\text{List}()) = \text{List}(), \qquad
+\text{filtrar}_p(x :: L) =
+\begin{cases}
+x :: \text{filtrar}_p(L) & \text{si } p(x) \\
+\text{filtrar}_p(L) & \text{si no}
+\end{cases}
+```
+
+```math
+\text{map}_g(\text{List}()) = \text{List}(), \qquad \text{map}_g(x :: L) = g(x) :: \text{map}_g(L)
+```
+
+```math
+\text{flatMap}_g(\text{List}()) = \text{List}(), \qquad \text{flatMap}_g(x :: L) = g(x) \mathbin{+\!\!+} \text{flatMap}_g(L)
+```
+
+Con esta notación, $S_g(r) = \text{filtrar}_{\rho = g}(r)$, y la traducción de cada
+`for` del taller es una composición de estas tres operaciones.
+
+---
+
+## Punto 1: consultas con expresiones for
+
+### 1.1 Especificaciones
+
+**`fuertes`.** Sea $u$ el umbral y sean $i_1 < i_2 < \cdots < i_k$ exactamente
+los índices $i$ con $\mu(s_i) > u$. Entonces:
+
+```math
+f_{\text{fuertes}}(r, u) = \text{List}\big(\rho(s_{i_1}), \ldots, \rho(s_{i_k})\big)
+```
+
+Es decir: las regiones de los sismos que superan el umbral, en el orden del
+registro y **sin quitar repetidos**.
+
+**`enRegion`.** Para una región $g$:
+
+```math
+f_{\text{enRegion}}(r, g) = \text{List}\big(\mu(s_{i_1}), \ldots, \mu(s_{i_k})\big), \quad i_1 < \cdots < i_k, \quad \{i_1, \ldots, i_k\} = \{\, i \mid \rho(s_i) = g \,\}
+```
+
+**`paresCercanos`.** Sea $d \geq 0$ la diferencia permitida. Sea
+$G(r) = (g_1, \ldots, g_m)$ la lista de las regiones de $R(r)$ sin repetir,
+ordenadas por su primera aparición en $r$, es decir,
+$\text{prim}(g_1) < \cdots < \text{prim}(g_m)$ con
+$\text{prim}(g) = \min\{\, i \mid \rho(s_i) = g \,\}$. Para dos regiones $a, b$:
+
+```math
+C(a, b) \iff \exists\, s, t \in r : \rho(s) = a \ \wedge\ \rho(t) = b \ \wedge\ |\mu(s) - \mu(t)| \leq d
+```
+
+Entonces:
+
+```math
+f_{\text{pares}}(r, d) = \text{List}\big( (g_i, g_j) \;\mid\; 1 \leq i < j \leq m,\ C(g_i, g_j) \big)
+```
+
+ordenada lexicográficamente por $(i, j)$.
+
+### 1.2 Corrección de `fuertes`
+
+El programa es:
+
+```scala
+for { s <- r; if s.magnitud > umbral } yield s.region
+```
+
+que, por la traducción del compilador, es $P_{\text{fuertes}}(r, u) = \text{map}_{\rho}(\text{filtrar}_{p}(r))$
+con $p(s) \equiv \mu(s) > u$.
+
+Vamos a demostrar que $\forall r : P_{\text{fuertes}}(r, u) == f_{\text{fuertes}}(r, u)$.
+Se usa inducción estructural sobre $r$.
+
+**Caso base:** $r = \text{List}()$
+
+```math
+P_{\text{fuertes}}(\text{List}(), u) \rightarrow \text{map}_{\rho}(\text{filtrar}_{p}(\text{List}())) \rightarrow \text{map}_{\rho}(\text{List}()) \rightarrow \text{List}()
+```
+
+Por otro lado, no hay índices, así que $f_{\text{fuertes}}(\text{List}(), u) = \text{List}()$.
+Entonces $P_{\text{fuertes}}(\text{List}(), u) == f_{\text{fuertes}}(\text{List}(), u)$.
+
+**Caso de inducción:** $r = s :: r'$. La hipótesis de inducción (HI) es
+$P_{\text{fuertes}}(r', u) == f_{\text{fuertes}}(r', u)$. Hay dos posibilidades:
+
+- Si $\mu(s) > u$:
+
+```math
+P_{\text{fuertes}}(s :: r', u) \rightarrow \text{map}_{\rho}(s :: \text{filtrar}_p(r')) \rightarrow \rho(s) :: \text{map}_{\rho}(\text{filtrar}_p(r')) = \rho(s) :: P_{\text{fuertes}}(r', u) \overset{\text{HI}}{=} \rho(s) :: f_{\text{fuertes}}(r', u)
+```
+
+Por otro lado, el índice 1 cumple la condición y es el menor de todos; los
+demás índices seleccionados son los de $r'$, desplazados en uno. Entonces
+$f_{\text{fuertes}}(s :: r', u) = \rho(s) :: f_{\text{fuertes}}(r', u)$.
+
+- Si $\mu(s) \leq u$:
+
+```math
+P_{\text{fuertes}}(s :: r', u) \rightarrow \text{map}_{\rho}(\text{filtrar}_p(r')) = P_{\text{fuertes}}(r', u) \overset{\text{HI}}{=} f_{\text{fuertes}}(r', u)
+```
+
+Y el índice 1 no se selecciona, de modo que $f_{\text{fuertes}}(s :: r', u) = f_{\text{fuertes}}(r', u)$.
+
+En ambos casos $P_{\text{fuertes}}(r, u) == f_{\text{fuertes}}(r, u)$.
+
+Concluimos por inducción que $\forall r : P_{\text{fuertes}}(r, u) == f_{\text{fuertes}}(r, u)$. $\blacksquare$
+
+**Dos consecuencias que pide el enunciado.**
+
+- **Repetidos:** el programa no aplica ninguna eliminación de duplicados. Si
+  $\rho(s_i) = \rho(s_j)$ con $i \neq j$ y ambos superan el umbral, la región
+  aparece dos veces, porque la longitud del resultado es
+  $\text{len}(f_{\text{fuertes}}(r, u)) = |\{\, i \mid \mu(s_i) > u \,\}|$.
+- **Umbral estricto:** se usa $>$, así que un sismo con $\mu(s) = u$ no entra.
+
+### 1.3 Corrección de `enRegion`
+
+El programa es:
+
+```scala
+for { s <- r; if s.region == region } yield s.magnitud
+```
+
+es decir, $P_{\text{enRegion}}(r, g) = \text{map}_{\mu}(\text{filtrar}_{q}(r)) = \text{map}_{\mu}(S_g(r))$
+con $q(s) \equiv \rho(s) = g$.
+
+Vamos a demostrar que $\forall r : P_{\text{enRegion}}(r, g) == f_{\text{enRegion}}(r, g)$.
+
+**Caso base:** $r = \text{List}()$
+
+```math
+P_{\text{enRegion}}(\text{List}(), g) \rightarrow \text{map}_{\mu}(S_g(\text{List}())) \rightarrow \text{map}_{\mu}(\text{List}()) \rightarrow \text{List}()
+```
+
+Y $f_{\text{enRegion}}(\text{List}(), g) = \text{List}()$, porque no hay índices.
+
+**Caso de inducción:** $r = s :: r'$. La HI es
+$P_{\text{enRegion}}(r', g) == f_{\text{enRegion}}(r', g)$.
+
+- Si $\rho(s) = g$: $S_g(s :: r') = s :: S_g(r')$, luego
+
+```math
+P_{\text{enRegion}}(s :: r', g) \rightarrow \text{map}_{\mu}(s :: S_g(r')) \rightarrow \mu(s) :: P_{\text{enRegion}}(r', g) \overset{\text{HI}}{=} \mu(s) :: f_{\text{enRegion}}(r', g)
+```
+
+que es $f_{\text{enRegion}}(s :: r', g)$, porque el índice 1 se selecciona y es el menor.
+
+- Si $\rho(s) \neq g$: $S_g(s :: r') = S_g(r')$, luego
+  $P_{\text{enRegion}}(s :: r', g) = P_{\text{enRegion}}(r', g) \overset{\text{HI}}{=} f_{\text{enRegion}}(r', g) = f_{\text{enRegion}}(s :: r', g)$.
+
+Concluimos por inducción que $\forall r : P_{\text{enRegion}}(r, g) == f_{\text{enRegion}}(r, g)$. $\blacksquare$
+
+**Región ausente.** Si $g \notin R(r)$, entonces $S_g(r) = \text{List}()$ y
+$\text{enRegion}(r, g) = \text{List}()$, que es lo que pide el enunciado.
+
+### 1.4 Corrección de `paresCercanos`
+
+Se demuestra en tres lemas y un teorema.
+
+**Lema 1 (regiones sin repetir).** En el programa,
+`regiones` $= G(r)$ y `indexadas` $= \text{List}((g_1, 0), \ldots, (g_m, m-1))$.
+
+_Demostración._ `(for (s <- r) yield s.region)` es $\text{map}_{\rho}(r)$,
+la lista $(\rho(s_1), \ldots, \rho(s_n))$. Por definición, `distinct` conserva la
+**primera aparición** de cada elemento y su orden relativo, así que entrega
+$(g_1, \ldots, g_m)$ con $\text{prim}(g_1) < \cdots < \text{prim}(g_m)$, que es $G(r)$.
+`zipWithIndex` agrega el índice contando desde 0. Si llamamos $i$ al índice de
+la matemática (desde 1) y $i'$ al del código, $i' = i - 1$, y la condición
+$i' < j'$ equivale a $i < j$. $\blacksquare$
+
+**Lema 2 (el `for` interno).** Sea
+$\text{cercanos}(a, b)$ la lista que produce el `for` interno. Entonces
+
+```math
+\text{cercanos}(a, b) \neq \text{List}() \iff C(a, b)
+```
+
+_Demostración._ El `for` interno se traduce a
+
+```math
+\text{cercanos}(a, b) = \text{flatMap}_{\,h}\big(S_a(r)\big), \qquad h(s_1) = \text{map}_{(s_1, \cdot)}\big(\text{filtrar}_{\,|\mu(s_1) - \mu(\cdot)| \leq d}(S_b(r))\big)
+```
+
+Por la ecuación de $\text{flatMap}$, el resultado es la concatenación de los
+bloques $h(s_1)$ para cada $s_1 \in S_a(r)$. Una concatenación es no vacía si y
+solo si algún bloque es no vacío. A su vez, $h(s_1)$ es no vacío si y solo si
+existe $s_2 \in S_b(r)$ con $|\mu(s_1) - \mu(s_2)| \leq d$. Por lo tanto,
+$\text{cercanos}(a, b) \neq \text{List}()$ si y solo si existen
+$s_1 \in S_a(r)$ y $s_2 \in S_b(r)$ con esa propiedad, que es $C(a, b)$. $\blacksquare$
+
+**Lema 3 (los generadores y la guardia).** Los generadores
+`(a, i) <- indexadas` y `(b, j) <- indexadas` recorren los pares
+$(g_i, g_j)$ de $G(r) \times G(r)$ en orden lexicográfico de $(i, j)$, y la
+guardia $i < j$ deja exactamente los pares con $i < j$.
+
+_Demostración._ El `for` externo se traduce a un $\text{flatMap}$ sobre los
+elementos de `indexadas`, en orden creciente de $i$. Para cada $i$, el segundo
+generador recorre `indexadas` en orden creciente de $j$. Por la ecuación de
+$\text{flatMap}$, el resultado es la concatenación, en orden creciente de $i$, de
+los bloques ordenados por $j$: es decir, orden lexicográfico de $(i, j)$. La
+guardia $i < j$ descarta los demás. $\blacksquare$
+
+**Teorema.** $\forall r : P_{\text{pares}}(r, d) == f_{\text{pares}}(r, d)$.
+
+_Demostración._ Por el Lema 1, los pares sobre los que se itera son los de
+$G(r)$ con sus índices. Por el Lema 3, se consideran exactamente los pares
+$(g_i, g_j)$ con $i < j$, en orden lexicográfico de $(i, j)$. Por el Lema 2,
+la guardia `cercanos.nonEmpty` deja pasar el par si y solo si $C(g_i, g_j)$.
+Por último, `yield (a, b)` devuelve $(g_i, g_j)$ sin cambiar el orden. El
+resultado es entonces la lista de los $(g_i, g_j)$ con $i < j$ y $C(g_i, g_j)$,
+ordenados lexicográficamente por $(i, j)$, que es $f_{\text{pares}}(r, d)$. $\blacksquare$
+
+**Propiedades que pide el enunciado.**
+
+- **Regiones distintas:** los elementos de $G(r)$ son distintos entre sí, así
+  que $i < j$ implica $g_i \neq g_j$. Nunca se empareja una región consigo misma.
+- **Cada pareja una sola vez:** cada pareja no ordenada $\{g_i, g_j\}$ con
+  $i \neq j$ tiene exactamente una representación con $i < j$. Por eso, si sale
+  $(\text{Valle}, \text{Choco})$, no sale $(\text{Choco}, \text{Valle})$.
+- **Orden de aparición:** $i < j$ significa $\text{prim}(g_i) < \text{prim}(g_j)$, es
+  decir, la primera región del par es la que aparece antes en el registro.
+- **Simetría de $C$:** como $|x - y| = |y - x|$, se cumple $C(a, b) \iff C(b, a)$,
+  así que evaluar cada pareja en un solo orden no pierde ni inventa resultados.
+- **Casos vacíos:** si ninguna pareja de sismos de regiones distintas cumple
+  $|\mu(s) - \mu(t)| \leq d$, entonces $C$ es falso para todo par y el resultado
+  es $\text{List}()$. Con una sola región, $m = 1$ y no existen pares con $i < j$.
+  Si $d < 0$, la condición $|\cdot| \leq d$ es imposible y el resultado también
+  es $\text{List}()$.
+
+### 1.5 Verificación con los ejemplos del enunciado
+
+Con el registro del enunciado, $G(r) = (\text{Valle}, \text{Santander}, \text{Choco})$.
+
+| $d$ | Parejas $(g_i, g_j)$ con $C$ | Resultado |
+|:---:|---|---|
+| 0.1 | ninguna | `List()` |
+| 0.6 | (Valle, Santander), pues $\lvert 5.3 - 5.1 \rvert = 0.2 \leq 0.6$ | `List(("Valle", "Santander"))` |
+| 1.0 | las tres: $0.2$, $0.7$ y $0.9$ son $\leq 1.0$ | `List(("Valle", "Santander"), ("Valle", "Choco"), ("Santander", "Choco"))` |
+
+Y para `fuertes` y `enRegion`:
+
+```math
+f_{\text{fuertes}}(r, 5.0): \ \mu > 5.0 \text{ en } s_2, s_4, s_6 \Rightarrow \text{List}(\text{Santander}, \text{Choco}, \text{Valle})
+```
+
+```math
+f_{\text{enRegion}}(r, \text{Valle}): \ \rho = \text{Valle} \text{ en } s_1, s_3, s_6 \Rightarrow \text{List}(4.2, 3.8, 5.3)
+```
+
+### 1.6 Independencia del orden de recorrido
+
+**Teorema.** Sea $r'$ una permutación de $r$ (los mismos sismos, en otro orden).
+
+1. $\text{fuertes}(r', u)$ es una permutación de $\text{fuertes}(r, u)$. Lo
+   mismo vale para $\text{enRegion}(r', g)$ y $\text{enRegion}(r, g)$.
+2. El conjunto de parejas **no ordenadas** de $\text{paresCercanos}(r', d)$ es
+   igual al de $\text{paresCercanos}(r, d)$.
+3. Si además la permutación conserva el orden de primera aparición de las
+   regiones, entonces $\text{paresCercanos}(r', d) = \text{paresCercanos}(r, d)$
+   como listas.
+
+_Demostración._
+
+1. La decisión de incluir un sismo $s$ depende solo de $s$ (de $\mu(s) > u$ o de
+   $\rho(s) = g$), nunca de los demás sismos ni del momento en que se evalúa.
+   Entonces el multiconjunto de sismos seleccionados es
+   $\{\!\{\, s \in r \mid p(s) \,\}\!\}$, y una permutación de $r$ no cambia los
+   elementos, solo su posición. Aplicar $\rho$ o $\mu$ a cada uno da el mismo
+   multiconjunto de resultados. Lo único que depende del orden es la posición
+   en la lista, y por especificación es la del registro.
+2. $R(r') = R(r)$, y para cada región $S_a(r')$ es una permutación de $S_a(r)$.
+   La condición
+   $C(a, b) \iff \exists s \in S_a, \exists t \in S_b : |\mu(s) - \mu(t)| \leq d$
+   es una proposición existencial: la disyunción de proposiciones es
+   conmutativa y asociativa, así que su valor no cambia al reordenar los sismos
+   que se examinan, ni al intercambiar el orden de los dos generadores internos.
+   Entonces $C$ es la misma para $r$ y $r'$, y también el conjunto de parejas
+   no ordenadas $\{a, b\}$ que la cumplen.
+3. $f_{\text{pares}}$ depende de $r$ solo a través de $G(r)$ y de $C$. $C$ no
+   cambia por el punto 2, y $G(r') = G(r)$ cuando se conserva el orden de primera
+   aparición de las regiones. Luego las dos listas son iguales. $\blacksquare$
+
+Esto garantiza que la manera en que el compilador evalúe el `for` (qué sismo
+mira primero, en qué orden recorre los generadores internos) no altera lo que
+se busca.
+
+### 1.7 Precisión numérica
+
+Las diferencias $|\mu(s) - \mu(t)|$ se calculan en `Double`, así que pueden
+traer errores del orden de $10^{-16}$. La demostración es exacta sobre los
+reales. En `Double` solo podría cambiar un resultado si una diferencia cae
+prácticamente sobre el valor de `dif`; en los ejemplos del enunciado las
+diferencias relevantes (0.2, 0.7 y 0.9) están lejos de los valores de `dif`
+usados (0.1, 0.6 y 1.0).

@@ -14,13 +14,13 @@ Llene esta tabla con el nombre completo y el código de cada integrante. Es
 parte de la entrega: si falta alguno, la entrega se sanciona con el 20 % de
 la nota.
 
-| Nombre completo          | Código  |
-|--------------------------|---------|
-| Santiago Velandia Lozano | 2559822 |
-| Sebastian Castro Cárdenas| 2559772 |
+| Nombre completo              | Código  |
+|------------------------------|---------|
+| Santiago Velandia Lozano     | 2559822 |
+| Sebastian Castro Cárdenas    | 2559772 |
 | David Alejandro López Álvarez | 2559790 |
-|                           |         |
-|                           |         |
+| Juan stevan Cataño Hernandez | 2559832 |
+|                              |         |
 
 ## Cómo está organizado el proyecto
 
