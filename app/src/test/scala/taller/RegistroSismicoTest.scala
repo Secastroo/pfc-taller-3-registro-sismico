@@ -188,6 +188,35 @@ class RegistroSismicoTest extends AnyFunSuite {
 
   // PRUEBAS ESTUDIANTES
   // Punto 1
+  test("fuertes: con 4.5 salen cuatro regiones, con repetidos y en orden") {
+    // 5.1 Santander, 6.0 Choco, 4.7 Santander, 5.3 Valle
+    assert(fuertes(registro, 4.5) == List("Santander", "Choco", "Santander", "Valle"))
+  }
+
+  test("fuertes: sobre el registro vacío no hay regiones") {
+    assert(fuertes(vacio, 1.0) == List())
+  }
+
+  test("enRegion: las magnitudes de Choco incluyen el extremo mayor y el menor") {
+    assert(enRegion(registro, "Choco") == List(6.0, 3.1))
+  }
+
+  test("paresCercanos: una sola región no forma parejas") {
+    val soloValle = List(
+      Sismo(Fecha(2026, 1), "Valle", 4.0, 10),
+      Sismo(Fecha(2026, 2), "Valle", 4.0, 20)
+    )
+    assert(paresCercanos(soloValle, 10.0) == List())
+  }
+
+  test("paresCercanos: con dif 0.0 solo empareja magnitudes iguales, en orden de aparición") {
+    val r = List(
+      Sismo(Fecha(2026, 1), "Nariño", 4.0, 10),
+      Sismo(Fecha(2026, 1), "Cauca", 4.0, 20),
+      Sismo(Fecha(2026, 2), "Huila", 7.5, 15)
+    )
+    assert(paresCercanos(r, 0.0) == List(("Nariño", "Cauca")))
+  }
 
   // Punto 2
 
