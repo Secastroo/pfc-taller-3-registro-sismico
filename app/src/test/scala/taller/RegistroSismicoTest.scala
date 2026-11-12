@@ -219,7 +219,30 @@ class RegistroSismicoTest extends AnyFunSuite {
   }
 
   // Punto 2
+  test("propia porRegion: con los dos primeros sismos hay dos regiones") {
+    val resultado = porRegion(registro.take(2))
+    assert(resultado.keySet == Set("Valle", "Santander"))
+    assert(resultado("Valle").length == 1)
+  }
 
+  test("propia conteoPorRegion: con los últimos cuatro sismos") {
+    assert(conteoPorRegion(registro.drop(3)) ==
+      Map("Choco" -> 2, "Santander" -> 1, "Valle" -> 1))
+  }
+
+  test("propia conteoPorRegion: un solo sismo da conteo uno") {
+    assert(conteoPorRegion(registro.take(1)) == Map("Valle" -> 1))
+  }
+
+  test("propia magnitudMaxima: con los tres primeros sismos") {
+    assert(magnitudMaxima(registro.take(3)) ==
+      Map("Valle" -> 4.2, "Santander" -> 5.1))
+  }
+
+  test("propia punto 2: el resultado no cambia si el registro se recorre al revés") {
+    assert(conteoPorRegion(registro.reverse) == conteoPorRegion(registro))
+    assert(magnitudMaxima(registro.reverse) == magnitudMaxima(registro))
+  }
   // Punto 3
   test("propia conteoSeguro: Choco y Santander responden dos") {
     assert(conteoSeguro(registro)("Choco") == 2)
