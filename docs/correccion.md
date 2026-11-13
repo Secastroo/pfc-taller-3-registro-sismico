@@ -958,10 +958,6 @@ orden).
 
 Esto es lo que garantiza que `groupBy` y los pliegues internos (`length`,
 `max`) puedan recorrer el registro en cualquier orden sin cambiar el informe.
-# Informe de corrección
-
-Fundamentos de Programación Funcional y Concurrente.
-Taller 3: consultas sobre un registro sísmico.
 
 ## Notación común
 
