@@ -127,7 +127,167 @@ sequenceDiagram
     L4->>L5: tail call con (1, 120)
     L5-->>Main: return 120
 ```
+## Punto 2: agrupar con mapas
 
+### Código
+
+```scala
+def porRegion(r: Registro): Map[String, List[Sismo]] =
+  r.foldLeft(Map[String, List[Sismo]]()) { (mapa, sismo) =>
+    mapa + (sismo.region -> (mapa.getOrElse(sismo.region, List()) :+ sismo))
+  }
+
+def conteoPorRegion(r: Registro): Map[String, Int] = {
+  val grupos = porRegion(r)
+  grupos.map { case (region, sismos) =>
+    (region, sismos.length)
+  }
+}
+
+def magnitudMaxima(r: Registro): Map[String, Double] = {
+  val grupos = porRegion(r)
+  grupos.map { case (region, sismos) =>
+    val magnitudes = sismos.map(sismo => sismo.magnitud)
+    (region, magnitudes.max)
+  }
+}
+```
+
+### Qué hace cada operación
+
+* Un `Map[String, List[Sismo]]` es una tabla: cada **llave** (la región) apunta a
+  un **valor** (la lista de sismos de esa región).
+* `r.foldLeft(inicio) { (mapa, sismo) => ... }` recorre la lista `r` de
+  izquierda a derecha. Empieza con el valor `inicio` y, por cada sismo, aplica la
+  función `(mapa, sismo) => ...`, que recibe lo armado hasta ahora (`mapa`) y el
+  sismo que toca, y devuelve el mapa nuevo. El mapa que devuelve el último sismo
+  es el resultado.
+* `Map[String, List[Sismo]]()` es el `inicio`: un mapa vacío.
+* `mapa.getOrElse(sismo.region, List())` pide la lista de la región del sismo.
+  Si la región todavía no está en el mapa, devuelve una lista vacía.
+* `:+ sismo` agrega el sismo al final de esa lista y devuelve una lista nueva.
+* `mapa + (region -> lista)` devuelve un mapa nuevo con ese par. Si la región ya
+  estaba, reemplaza su lista; si no, la agrega. El mapa anterior no se modifica.
+* `grupos.map { case (region, sismos) => ... }` visita cada par del mapa. El
+  `case (region, sismos)` le pone nombre a la llave y al valor. La función
+  devuelve un par nuevo, y esos pares forman un `Map` nuevo.
+* `sismos.length` es la cantidad de sismos de la lista.
+* `sismos.map(sismo => sismo.magnitud)` convierte la lista de sismos en la lista
+  de sus magnitudes, y `.max` toma la mayor.
+* `val grupos = porRegion(r)` le pone nombre al resultado para usarlo en la
+  línea siguiente. Un `val` se fija una vez y no cambia, así que no es una
+  variable.
+
+`foldLeft` reemplaza al ciclo: no hay `var`, `while` ni `return`. Lo que va
+armado viaja de un paso al siguiente como el parámetro `mapa`.
+
+### Expresiones `for`
+
+En el punto 2 **no se usó ninguna expresión `for`**: los agrupamientos se hacen
+con mapas (`foldLeft` y `map`). Si `conteoPorRegion` se escribiera con `for`,
+sería:
+
+```scala
+for ((region, sismos) <- porRegion(r)) yield (region, sismos.length)
+```
+
+y el compilador lo traduce a `porRegion(r).map { case (region, sismos) => (region, sismos.length) }`,
+que es la versión entregada.
+
+### Ejecución paso a paso: `porRegion(registro)`
+
+Se empieza con `Map()`. En cada paso se procesa un sismo y se crea un mapa nuevo
+(para abreviar, las listas muestran solo las magnitudes).
+
+| Paso | Sismo que se procesa | ¿La región ya estaba? | Mapa después del paso |
+|:---:|---|:---:|---|
+| 0 | (inicio) | | `Map()` |
+| 1 | Valle, 4.2 | No | Valle → (4.2) |
+| 2 | Santander, 5.1 | No | Valle → (4.2), Santander → (5.1) |
+| 3 | Valle, 3.8 | Sí | Valle → (4.2, 3.8), Santander → (5.1) |
+| 4 | Choco, 6.0 | No | Valle → (4.2, 3.8), Santander → (5.1), Choco → (6.0) |
+| 5 | Santander, 4.7 | Sí | Valle → (4.2, 3.8), Santander → (5.1, 4.7), Choco → (6.0) |
+| 6 | Valle, 5.3 | Sí | Valle → (4.2, 3.8, 5.3), Santander → (5.1, 4.7), Choco → (6.0) |
+| 7 | Choco, 3.1 | Sí | Valle → (4.2, 3.8, 5.3), Santander → (5.1, 4.7), Choco → (6.0, 3.1) |
+
+Al terminar la lista, el resultado es el mapa del paso 7. Cada región conserva
+sus sismos en el orden en que aparecen en el registro.
+
+### Ejecución paso a paso: `conteoPorRegion(registro)`
+
+1. `porRegion(registro)` da el mapa del paso 7 y se guarda en `grupos`.
+2. `map` visita cada par y cambia la lista por su tamaño:
+
+   | Par que entra | `sismos.length` | Par que sale |
+   |---|:---:|---|
+   | Valle → (4.2, 3.8, 5.3) | 3 | (Valle, 3) |
+   | Santander → (5.1, 4.7) | 2 | (Santander, 2) |
+   | Choco → (6.0, 3.1) | 2 | (Choco, 2) |
+
+3. Los pares se reúnen en un mapa:
+   `Map("Valle" -> 3, "Santander" -> 2, "Choco" -> 2)`.
+
+### Ejecución paso a paso: `magnitudMaxima(registro)`
+
+1. `porRegion(registro)` da el mapa del paso 7 y se guarda en `grupos`.
+2. `map` visita cada par. Primero saca las magnitudes y luego toma la mayor:
+
+   | Región | `magnitudes` | `magnitudes.max` | Par que sale |
+   |---|---|:---:|---|
+   | Valle | List(4.2, 3.8, 5.3) | 5.3 | (Valle, 5.3) |
+   | Santander | List(5.1, 4.7) | 5.1 | (Santander, 5.1) |
+   | Choco | List(6.0, 3.1) | 6.0 | (Choco, 6.0) |
+
+3. Los pares se reúnen en un mapa:
+   `Map("Valle" -> 5.3, "Santander" -> 5.1, "Choco" -> 6.0)`.
+
+### Casos borde
+
+* **Registro vacío.** `foldLeft` no tiene sismos que procesar y devuelve el
+  `inicio`, `Map()`. Entonces `grupos` es `Map()`, el `map` no tiene pares que
+  visitar y `conteoPorRegion` y `magnitudMaxima` también dan `Map()`.
+* **Región que no está en el registro.** Una región solo entra al mapa cuando se
+  procesa un sismo suyo, así que una región ausente no aparece.
+* **Un solo sismo.** El mapa queda con una sola región. Su lista tiene un sismo,
+  su conteo es 1 y su máxima es la magnitud de ese sismo.
+* **`max` sobre una lista vacía.** Nunca ocurre: una región solo existe si tiene
+  al menos un sismo, así que cada lista tiene por lo menos un elemento.
+* **Orden.** Si el registro se recorre al revés, el conteo y la magnitud máxima
+  son los mismos. Solo cambia el orden de los sismos dentro de cada lista de
+  `porRegion` (ver `correccion.md`, sección 2.6). Además, el orden en que se
+  muestran las regiones dentro del `Map` no es parte del resultado.
+
+### Diagramas
+
+Cómo se relacionan las tres funciones:
+
+```mermaid
+flowchart LR
+    R["registro: List de Sismo"] --> F["porRegion: foldLeft arma el Map"]
+    F --> G["Map: region a lista de sismos"]
+    G --> C["conteoPorRegion: map con length"]
+    G --> M["magnitudMaxima: map con max de las magnitudes"]
+    C --> RC["Map: region a conteo"]
+    M --> RM["Map: region a magnitud maxima"]
+```
+
+Los primeros pasos de `foldLeft` en `porRegion(registro)`:
+
+```mermaid
+sequenceDiagram
+    participant F as foldLeft
+    participant M as mapa
+    F->>M: inicio, Map vacio
+    F->>M: Valle 4.2, no estaba, agrega Valle con lista de 4.2
+    M-->>F: Valle con 4.2
+    F->>M: Santander 5.1, no estaba, agrega Santander con lista de 5.1
+    M-->>F: Valle con 4.2 y Santander con 5.1
+    F->>M: Valle 3.8, ya estaba, agrega 3.8 al final de la lista de Valle
+    M-->>F: Valle con 4.2 y 3.8, Santander con 5.1
+    F->>M: sigue con los 4 sismos que faltan
+```
+
+---
 ## Punto 4: réplicas perezosas
 ### Código
 
