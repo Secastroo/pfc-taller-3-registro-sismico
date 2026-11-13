@@ -1,132 +1,194 @@
-# Algoritmo Factorial con Recursión de Cola
+## Punto 1: consultas con expresiones for
 
-## Definición del Algoritmo
+### Código
 
-```Scala
-def factorial(n: Int): BigInt = {
-  @annotation.tailrec
-  def loop(x: Int, acumulador: BigInt): BigInt = {
-    if (x <= 1) acumulador
-    else loop(x - 1, acumulador * x)
-  }
-  loop(n, 1)
+```scala
+def fuertes(r: Registro, umbral: Double): List[String] =
+  for {
+    s <- r
+    if s.magnitud > umbral
+  } yield s.region
+
+def enRegion(r: Registro, region: String): List[Double] =
+  for {
+    s <- r
+    if s.region == region
+  } yield s.magnitud
+
+def paresCercanos(r: Registro, dif: Double): List[(String, String)] = {
+  val regiones = (for (s <- r) yield s.region).distinct
+  val indexadas = regiones.zipWithIndex
+
+  for {
+    (a, i) <- indexadas
+    (b, j) <- indexadas
+    if i < j
+    cercanos = for {
+      s1 <- r if s1.region == a
+      s2 <- r if s2.region == b
+      if Math.abs(s1.magnitud - s2.magnitud) <= dif
+    } yield (s1, s2)
+    if cercanos.nonEmpty
+  } yield (a, b)
 }
 ```
 
-* La función `factorial` calcula el factorial de un número `n` utilizando **recursión de cola**.
-* La función interna `loop` es la que hace la recursión:
+Las tres consultas son expresiones `for` con `yield`. No hay `var`, `while` ni `return`, y las funciones auxiliares (`regiones`, `indexadas`, `cercanos`) viven dentro de `paresCercanos`.
 
-  * Recibe dos parámetros:
+### Qué hace cada función
 
-    * `x`: el valor actual decreciente hasta llegar a 1.
-    * `acumulador`: donde se guarda el resultado parcial en cada paso.
-* El decorador `@annotation.tailrec` obliga a que la función sea optimizada como recursión de cola, es decir, **no se acumulan llamados en la pila**.
+* `fuertes` recorre el registro, descarta los sismos cuya magnitud no supera el umbral y devuelve la región de los que quedan. No se quitan repetidos, así que una región con dos sismos fuertes aparece dos veces, en el orden del registro.
+* `enRegion` recorre el registro, se queda con los sismos de la región pedida y devuelve sus magnitudes. Si la región no está, ningún sismo pasa la guardia y el resultado es `List()`.
+* `paresCercanos` hace cuatro cosas:
+    * Calcula las regiones sin repetir, en orden de primera aparición (`regiones`).
+    * Les pone un índice con `zipWithIndex`.
+    * Forma todas las combinaciones de dos regiones y se queda solo con las que cumplen `i < j`. Así una región nunca se empareja consigo misma y cada pareja sale una sola vez.
+    * Deja pasar la pareja solo si existe algún par de sismos, uno de cada región, con magnitudes que difieren a lo sumo `dif`. Eso lo decide el `for` interno (`cercanos`).
 
-## Explicación paso a paso
+### Expresiones `for`: en qué se traducen
 
-### Caso base
+El compilador traduce todo `for` a `map`, `flatMap` y `withFilter` con estas reglas:
 
-```Scala
-if (x <= 1) acumulador
+* Un generador con `yield`: `for (x <- c) yield e` se traduce a `c.map(x => e)`.
+* Un generador con guardia: `for (x <- c if p) yield e` se traduce a `c.withFilter(x => p).map(x => e)`.
+* Varios generadores: todos menos el último se traducen a `flatMap`, y el último a `map`.
+
+**`fuertes`**
+
+```scala
+r.withFilter(s => s.magnitud > umbral).map(s => s.region)
 ```
 
-Cuando `x` llega a `1`, la función retorna directamente el valor acumulado, evitando más llamadas.
+**`enRegion`**
 
-### Caso recursivo
-
-```Scala
-loop(x - 1, acumulador * x)
+```scala
+r.withFilter(s => s.region == region).map(s => s.magnitud)
 ```
 
-En cada llamada:
+**`paresCercanos`, regiones sin repetir**
 
-* Se reduce el valor de `x` en 1.
-* Se multiplica el acumulador por `x` y se pasa a la siguiente iteración.
-* Como es recursión de cola, la llamada recursiva es la **última instrucción** en ejecutarse, lo que permite a Scala optimizar la pila.
-
----
-
-## Llamados de pila en recursión de cola
-
-Ejemplo:
-
-```Scala
-factorial(5)
+```scala
+r.map(s => s.region).distinct
 ```
 
-### Paso 1: Llamada inicial
+**`paresCercanos`, el `for` interno (`cercanos`)**
 
-```Scala
-loop(5, 1)
+```scala
+r.withFilter(s1 => s1.region == a).flatMap(s1 =>
+  r.withFilter(s2 => s2.region == b)
+   .withFilter(s2 => Math.abs(s1.magnitud - s2.magnitud) <= dif)
+   .map(s2 => (s1, s2)))
 ```
 
-### Paso 2: Primera iteración
+**`paresCercanos`, el `for` externo**
 
-```Scala
-loop(4, 5)   // acumulador = 1 * 5
+Tiene dos generadores, una guardia, una definición (`cercanos = ...`) y otra guardia. Es equivalente a:
+
+```scala
+indexadas.flatMap { case (a, i) =>
+  indexadas
+    .withFilter { case (b, j) => i < j }
+    .map { case (b, j) =>
+      val cercanos = /* el for interno */
+      (b, cercanos)
+    }
+    .withFilter { case (b, cercanos) => cercanos.nonEmpty }
+    .map { case (b, _) => (a, b) }
+}
 ```
 
-### Paso 3: Segunda iteración
+La definición `cercanos = ...` se convierte en un `val` dentro de un `map`, y la guardia siguiente filtra sobre ese valor. El patrón de tupla `(a, i) <- indexadas` puede añadir un `withFilter` que deja pasar todo, porque toda tupla cumple el patrón.
 
-```Scala
-loop(3, 20)  // acumulador = 5 * 4
-```
+### Ejecución paso a paso: `fuertes(registro, 5.0)`
 
-### Paso 4: Tercera iteración
+| Posición | Sismo | Magnitud | ¿Mayor que 5.0? | Aporta |
+|:---:|---|:---:|:---:|---|
+| 1 | Valle | 4.2 | No | — |
+| 2 | Santander | 5.1 | Sí | "Santander" |
+| 3 | Valle | 3.8 | No | — |
+| 4 | Choco | 6.0 | Sí | "Choco" |
+| 5 | Santander | 4.7 | No | — |
+| 6 | Valle | 5.3 | Sí | "Valle" |
+| 7 | Choco | 3.1 | No | — |
 
-```Scala
-loop(2, 60)  // acumulador = 20 * 3
-```
+Resultado: `List("Santander", "Choco", "Valle")`.
 
-### Paso 5: Cuarta iteración
+Con umbral `6.0` el sismo de Choco (magnitud exacta 6.0) no entra, porque la comparación es estricta. Con umbral `9.0` ningún sismo pasa y el resultado es `List()`.
 
-```Scala
-loop(1, 120) // acumulador = 60 * 2
-```
+### Ejecución paso a paso: `enRegion(registro, "Valle")`
 
-### Paso 6: Caso base
+| Posición | Región | ¿Es "Valle"? | Aporta |
+|:---:|---|:---:|:---:|
+| 1 | Valle | Sí | 4.2 |
+| 2 | Santander | No | — |
+| 3 | Valle | Sí | 3.8 |
+| 4 | Choco | No | — |
+| 5 | Santander | No | — |
+| 6 | Valle | Sí | 5.3 |
+| 7 | Choco | No | — |
 
-```Scala
-return 120
-```
+Resultado: `List(4.2, 3.8, 5.3)`.
 
----
+Caso borde, `enRegion(registro, "Amazonas")`: ningún sismo cumple la guardia y el resultado es `List()`. Con el registro vacío tampoco hay elementos que recorrer, y el resultado es `List()`.
 
-## Diferencia con recursión normal
+### Ejecución paso a paso: `paresCercanos(registro, 0.6)`
 
-* En **recursión normal** cada llamada queda en la pila esperando a que termine la siguiente, lo que puede causar desbordamiento si `n` es muy grande.
-* En **recursión de cola**, el compilador transforma el proceso en un **bucle optimizado**, por lo que no se guarda cada llamada en la pila y el algoritmo puede ejecutarse para valores muy grandes sin problema.
+1. `regiones` es `List("Valle", "Santander", "Choco")`, en el orden en que aparece cada una por primera vez.
+2. `indexadas` es `List(("Valle",0), ("Santander",1), ("Choco",2))`.
+3. Los dos generadores producen las 9 combinaciones $(a, b)$. La guardia `i < j` deja solo tres:
 
----
+   | Pareja | Magnitudes de $a$ | Magnitudes de $b$ | Menor diferencia | ¿Es $\le 0.6$? | ¿Sale? |
+         |---|---|---|:---:|:---:|:---:|
+   | (Valle, Santander) | 4.2, 3.8, 5.3 | 5.1, 4.7 | 0.2 (5.3 y 5.1) | Sí | Sí |
+   | (Valle, Choco) | 4.2, 3.8, 5.3 | 6.0, 3.1 | 0.7 (5.3 y 6.0, o 3.8 y 3.1) | No | No |
+   | (Santander, Choco) | 5.1, 4.7 | 6.0, 3.1 | 0.9 (5.1 y 6.0) | No | No |
 
-## Ejemplo de uso
+Resultado: `List(("Valle", "Santander"))`.
 
-```Scala
-val resultado = factorial(5)
-println(resultado)  // 120
-```
+Con `dif = 1.0` las tres parejas cumplen la condición y salen en el orden `(Valle, Santander)`, `(Valle, Choco)`, `(Santander, Choco)`. Con `dif = 0.1` ninguna cumple y el resultado es `List()`.
 
-El resultado de `factorial(5)` es `120`.
+Caso borde: con una sola región, `indexadas` tiene un solo elemento, no existe ningún par con `i < j` y el resultado es `List()`.
 
+### Diagramas
 
-## Diagrama de llamados de pila con recursión de cola
+Orden en que `fuertes(registro, 5.0)` pide y descarta los sismos:
 
 ```mermaid
 sequenceDiagram
-    participant Main as factorial(5)
-    participant L1 as loop(5, 1)
-    participant L2 as loop(4, 5)
-    participant L3 as loop(3, 20)
-    participant L4 as loop(2, 60)
-    participant L5 as loop(1, 120)
-
-    Main->>L1: llamada inicial
-    L1->>L2: tail call con (4, 5)
-    L2->>L3: tail call con (3, 20)
-    L3->>L4: tail call con (2, 60)
-    L4->>L5: tail call con (1, 120)
-    L5-->>Main: return 120
+    participant F as for con yield
+    participant W as withFilter
+    participant M as map
+    F->>W: sismo 1, magnitud 4.2
+    W-->>F: no pasa, 4.2 no es mayor que 5.0
+    F->>W: sismo 2, magnitud 5.1
+    W->>M: pasa
+    M-->>F: Santander
+    F->>W: sismo 3, magnitud 3.8
+    W-->>F: no pasa
+    F->>W: sismo 4, magnitud 6.0
+    W->>M: pasa
+    M-->>F: Choco
+    F->>W: sismos 5 y 7 no pasan
+    F->>W: sismo 6, magnitud 5.3
+    W->>M: pasa
+    M-->>F: Valle
 ```
+
+Flujo de `paresCercanos`:
+
+```mermaid
+flowchart TD
+    A["r: Registro"] --> B["regiones: regiones sin repetir en orden de aparicion"]
+    B --> C["indexadas: cada region con su indice"]
+    C --> D["generar (a,i) y (b,j)"]
+    D --> E{"i menor que j ?"}
+    E -- no --> X["descartar"]
+    E -- si --> F["cercanos: pares (s1,s2) de regiones a y b con diferencia menor o igual que dif"]
+    F --> G{"cercanos no vacio ?"}
+    G -- no --> X
+    G -- si --> H["yield (a, b)"]
+```
+---
 ## Punto 2: agrupar con mapas
 
 ### Código
@@ -286,7 +348,196 @@ sequenceDiagram
     M-->>F: Valle con 4.2 y 3.8, Santander con 5.1
     F->>M: sigue con los 4 sismos que faltan
 ```
+---
+## Punto 3: consultas seguras
 
+Un mapa normal tiene un defecto incómodo: si se le pide una llave que no tiene, se cae. Por ejemplo, `conteoPorRegion(registro)("Amazonas")` lanza `NoSuchElementException: key not found: Amazonas`. Este punto resuelve ese problema de tres maneras distintas, según lo que tenga sentido responder cuando no hay datos:
+
+* En `conteoSeguro`, la respuesta natural es cero: una región sin sismos tiene cero sismos.
+* En `maximaDe`, no hay una respuesta natural: la mayor magnitud de una región sin sismos no existe, y inventar un número sería mentir. Por eso la respuesta es `None`.
+* En `regionMasActiva`, si el registro está vacío no hay ninguna región que mencionar, y la respuesta también es `None`.
+  Para todas las trazas de este punto usamos el registro de siete sismos del enunciado. Con él, `conteoPorRegion(registro)` es `Map(Valle -> 3, Santander -> 2, Choco -> 2)` y `magnitudMaxima(registro)` es `Map(Valle -> 5.3, Santander -> 5.1, Choco -> 6.0)`.
+
+### conteoSeguro
+
+```scala
+def conteoSeguro(r: Registro): Map[String, Int] =
+  conteoPorRegion(r).withDefaultValue(0)
+```
+
+La función no calcula nada nuevo: toma el mapa de conteos del punto 2 y le agrega una regla para las llaves que faltan. Por dentro, `withDefaultValue(0)` devuelve el mismo mapa envuelto en una cápsula que sabe responder cero. Las entradas que tenía el mapa siguen exactamente igual.
+
+Lo que hay que entender bien es cuándo actúa ese cero. Solo actúa cuando se consulta con `c(k)`, es decir, con `apply`. Las otras operaciones del mapa no se enteran de que existe. Esto es lo que se obtuvo al probarlas sobre `c = conteoSeguro(registro)`:
+
+| Operación | Resultado | Comentario |
+|-----------|-----------|------------|
+| `c("Valle")` | 3 | la llave está, se devuelve su valor |
+| `c("Amazonas")` | 0 | la llave no está, se devuelve el valor por defecto |
+| `c.get("Amazonas")` | `None` | `get` no usa el valor por defecto |
+| `c.contains("Amazonas")` | `false` | la llave sigue sin existir |
+| `c.size` | 3 | el mapa no creció |
+| `c.keySet` | `Set(Valle, Santander, Choco)` | las llaves son las de siempre |
+
+La fila de `size` es la importante: responder cero no es lo mismo que guardar un cero. El valor por defecto se devuelve y se olvida, y el mapa queda como estaba. Por eso las llaves de `conteoSeguro(r)` siguen siendo exactamente las regiones del registro.
+
+Traza de `conteoSeguro(registro)("Valle")`:
+
+| Paso | Qué pasa | Valor |
+|------|----------|-------|
+| 1 | se calcula `conteoPorRegion(registro)` | `Map(Valle -> 3, Santander -> 2, Choco -> 2)` |
+| 2 | `withDefaultValue(0)` envuelve el mapa | los mismos conteos, con cero como respuesta de reserva |
+| 3 | se consulta la llave `"Valle"` | la llave está en el mapa |
+| 4 | se devuelve su valor | `3` |
+
+Traza de `conteoSeguro(registro)("Amazonas")`. Los pasos 1 y 2 son los mismos, y cambia lo que sigue:
+
+| Paso | Qué pasa | Valor |
+|------|----------|-------|
+| 3 | se consulta la llave `"Amazonas"` | la llave no está en el mapa |
+| 4 | se usa el valor por defecto | `0` |
+| 5 | el mapa queda como estaba | `size` sigue valiendo 3 |
+
+Con el registro vacío, `conteoPorRegion(List())` es el mapa vacío, y cualquier consulta cae en el caso de la llave ausente: `conteoSeguro(List())("Valle")` da 0, y `conteoSeguro(List()).size` sigue siendo 0.
+
+Se pueden hacer varias consultas seguidas sobre el mismo mapa sin que ninguna lo cambie:
+
+| Consulta sobre el mismo `c` | ¿La llave está? | Respuesta | Tamaño del mapa después |
+|-----------------------------|-----------------|-----------|-------------------------|
+| `c("Valle")` | sí | 3 | 3 |
+| `c("Amazonas")` | no | 0 | 3 |
+| `c("Cauca")` | no | 0 | 3 |
+| `c("Choco")` | sí | 2 | 3 |
+
+```mermaid
+flowchart TD
+    A["consulta c(k)"] --> B{"la llave k<br/>está en el mapa?"}
+    B -->|"sí"| C["se devuelve el conteo guardado"]
+    B -->|"no"| D["se devuelve 0"]
+    D --> E["el mapa no cambia,<br/>no se guarda la llave"]
+```
+
+### maximaDe
+
+```scala
+def maximaDe(r: Registro, region: String): Option[Double] =
+  magnitudMaxima(r).get(region)
+```
+
+Aquí se hace lo contrario de lo anterior. En lugar de inventar una respuesta de reserva, se le deja a la función decir con claridad que no hay respuesta. Para eso sirve `Option`: un valor de tipo `Option[Double]` es una de dos cosas, `Some(m)`, que trae la magnitud, o `None`, que no trae nada.
+
+`get` es la versión del mapa que nunca falla: si la llave está, devuelve `Some` con su valor, y si no está, devuelve `None`. La función entonces tiene dos pasos: calcula el mapa de máximas y le pregunta por la región con `get`.
+
+Traza de `maximaDe(registro, "Choco")`:
+
+| Paso | Qué pasa | Valor |
+|------|----------|-------|
+| 1 | se calcula `magnitudMaxima(registro)` | `Map(Valle -> 5.3, Santander -> 5.1, Choco -> 6.0)` |
+| 2 | se llama `.get("Choco")` | la llave está |
+| 3 | se devuelve `Some` con su valor | `Some(6.0)` |
+
+Y varias consultas para ver los dos caminos:
+
+| Consulta | ¿La región está? | Respuesta |
+|----------|------------------|-----------|
+| `maximaDe(registro, "Valle")` | sí | `Some(5.3)` |
+| `maximaDe(registro, "Santander")` | sí | `Some(5.1)` |
+| `maximaDe(registro, "Choco")` | sí | `Some(6.0)` |
+| `maximaDe(registro, "Amazonas")` | no | `None` |
+| `maximaDe(List(), "Valle")` | no, el registro está vacío | `None` |
+
+La ventaja de `Option` es que quien llama a la función no puede olvidarse del caso vacío, porque el tipo se lo recuerda. Se puede usar de dos maneras:
+
+```scala
+maximaDe(registro, "Choco") match {
+  case Some(m) => s"la máxima es $m"   // "la máxima es 6.0"
+  case None => "sin datos"
+}
+maximaDe(registro, "Amazonas").getOrElse(0.0)   // 0.0
+```
+
+Con `Choco` se obtiene `la máxima es 6.0`, con `Amazonas` el `match` da `sin datos`, y el `getOrElse` devuelve `0.0`. La diferencia con `conteoSeguro` es que aquí es quien consulta, y no la función, el que decide qué hacer cuando no hay dato.
+
+```mermaid
+flowchart LR
+    R["registro"] --> M["magnitudMaxima<br/>Map región -> máxima"]
+    M --> G{"get(región)"}
+    G -->|"la llave está"| S["Some(máxima)"]
+    G -->|"la llave no está"| N["None"]
+```
+
+### regionMasActiva
+
+```scala
+def regionMasActiva(r: Registro): Option[String] = {
+  val conteo = conteoPorRegion(r)
+  if (conteo.isEmpty) None
+  else {
+    val ordenadas = conteo.keys.toList.sorted
+    Some(ordenadas.maxBy(region => conteo(region)))
+  }
+}
+```
+
+La función avanza en cuatro pasos:
+
+1. Calcula el conteo de sismos por región.
+2. Si el conteo está vacío, no hay regiones y responde `None`.
+3. Si no, ordena los nombres de las regiones alfabéticamente.
+4. Recorre esa lista con `maxBy`, que busca la región con el mayor conteo, y responde `Some` con ella.
+   El truco para el desempate está en el orden de los pasos 3 y 4. `maxBy` se queda con el primer elemento de la lista que alcanza el valor más grande. Para eso recorre la lista de izquierda a derecha guardando el mejor hasta el momento, y solo lo reemplaza cuando aparece uno estrictamente mayor. Un empate no lo reemplaza. Como la lista ya está en orden alfabético, el primero en llegar a ese valor es el que va antes en el alfabeto.
+
+Traza con el registro del enunciado:
+
+| Paso | Valor |
+|------|-------|
+| `conteo` | `Map(Valle -> 3, Santander -> 2, Choco -> 2)` |
+| ¿está vacío? | no |
+| `ordenadas` | `List(Choco, Santander, Valle)` |
+| `maxBy`, ver tabla siguiente | `Valle` |
+| resultado | `Some("Valle")` |
+
+El recorrido de `maxBy`, región por región:
+
+| Región | Conteo | Mejor hasta ahora | ¿Supera estrictamente al mejor? |
+|--------|--------|-------------------|---------------------------------|
+| Choco | 2 | Choco, es el primero | no hay con qué comparar |
+| Santander | 2 | Choco | no, 2 no es mayor que 2 |
+| Valle | 3 | Valle | sí, 3 es mayor que 2 |
+
+Traza de un empate. Con los dos primeros sismos del registro, `registro.take(2)`, que son uno de Valle y uno de Santander:
+
+| Paso | Valor |
+|------|-------|
+| `conteo` | `Map(Valle -> 1, Santander -> 1)` |
+| `ordenadas` | `List(Santander, Valle)` |
+
+| Región | Conteo | Mejor hasta ahora | ¿Supera estrictamente al mejor? |
+|--------|--------|-------------------|---------------------------------|
+| Santander | 1 | Santander, es el primero | no hay con qué comparar |
+| Valle | 1 | Santander | no, 1 no es mayor que 1 |
+
+El resultado es `Some("Santander")`. Vale la pena fijarse en que Valle aparece primero en el registro, pero gana Santander, porque el desempate es alfabético y no depende del orden del registro. Otro empate parecido, con un sismo de Zulia y otro de Arauca, da `Some("Arauca")`.
+
+Traza con el registro vacío:
+
+| Paso | Valor |
+|------|-------|
+| `conteo` | `Map()` |
+| ¿está vacío? | sí |
+| resultado | `None` |
+
+La comprobación de que el conteo está vacío no es un adorno. Llamar `maxBy` sobre una lista vacía lanza `UnsupportedOperationException: empty.maxBy`, así que si no se revisara antes, `regionMasActiva(List())` se caería en lugar de devolver `None`.
+
+Por último, como el resultado sale de una lista que se ordena primero, no depende de cómo el mapa entregue sus llaves. Con el registro al revés, `registro.reverse`, el resultado sigue siendo `Some("Valle")`.
+
+```mermaid
+flowchart TD
+    A["conteoPorRegion(registro)"] --> B{"el conteo<br/>está vacío?"}
+    B -->|"sí"| C["None"]
+    B -->|"no"| D["ordenar las regiones<br/>alfabéticamente"]
+    D --> E["maxBy: recorrer en orden<br/>y quedarse con la primera<br/>de mayor conteo"]
+    E --> F["Some(región)"]
+```
 ---
 ## Punto 4: réplicas perezosas
 ### Código
@@ -518,402 +769,5 @@ flowchart TD
     X --> U
     N --> U
     U --> I["Map: region a Resumen"]
-```
-# Informe de proceso
-
-Fundamentos de Programación Funcional y Concurrente.
-Taller 3: consultas sobre un registro sísmico.
-
-## Punto 1: consultas con expresiones for
-
-### Código
-
-```scala
-def fuertes(r: Registro, umbral: Double): List[String] =
-  for {
-    s <- r
-    if s.magnitud > umbral
-  } yield s.region
-
-def enRegion(r: Registro, region: String): List[Double] =
-  for {
-    s <- r
-    if s.region == region
-  } yield s.magnitud
-
-def paresCercanos(r: Registro, dif: Double): List[(String, String)] = {
-  val regiones = (for (s <- r) yield s.region).distinct
-  val indexadas = regiones.zipWithIndex
-
-  for {
-    (a, i) <- indexadas
-    (b, j) <- indexadas
-    if i < j
-    cercanos = for {
-      s1 <- r if s1.region == a
-      s2 <- r if s2.region == b
-      if Math.abs(s1.magnitud - s2.magnitud) <= dif
-    } yield (s1, s2)
-    if cercanos.nonEmpty
-  } yield (a, b)
-}
-```
-
-Las tres consultas son expresiones `for` con `yield`. No hay `var`, `while` ni `return`, y las funciones auxiliares (`regiones`, `indexadas`, `cercanos`) viven dentro de `paresCercanos`.
-
-### Qué hace cada función
-
-* `fuertes` recorre el registro, descarta los sismos cuya magnitud no supera el umbral y devuelve la región de los que quedan. No se quitan repetidos, así que una región con dos sismos fuertes aparece dos veces, en el orden del registro.
-* `enRegion` recorre el registro, se queda con los sismos de la región pedida y devuelve sus magnitudes. Si la región no está, ningún sismo pasa la guardia y el resultado es `List()`.
-* `paresCercanos` hace cuatro cosas:
-    * Calcula las regiones sin repetir, en orden de primera aparición (`regiones`).
-    * Les pone un índice con `zipWithIndex`.
-    * Forma todas las combinaciones de dos regiones y se queda solo con las que cumplen `i < j`. Así una región nunca se empareja consigo misma y cada pareja sale una sola vez.
-    * Deja pasar la pareja solo si existe algún par de sismos, uno de cada región, con magnitudes que difieren a lo sumo `dif`. Eso lo decide el `for` interno (`cercanos`).
-
-### Expresiones `for`: en qué se traducen
-
-El compilador traduce todo `for` a `map`, `flatMap` y `withFilter` con estas reglas:
-
-* Un generador con `yield`: `for (x <- c) yield e` se traduce a `c.map(x => e)`.
-* Un generador con guardia: `for (x <- c if p) yield e` se traduce a `c.withFilter(x => p).map(x => e)`.
-* Varios generadores: todos menos el último se traducen a `flatMap`, y el último a `map`.
-
-**`fuertes`**
-
-```scala
-r.withFilter(s => s.magnitud > umbral).map(s => s.region)
-```
-
-**`enRegion`**
-
-```scala
-r.withFilter(s => s.region == region).map(s => s.magnitud)
-```
-
-**`paresCercanos`, regiones sin repetir**
-
-```scala
-r.map(s => s.region).distinct
-```
-
-**`paresCercanos`, el `for` interno (`cercanos`)**
-
-```scala
-r.withFilter(s1 => s1.region == a).flatMap(s1 =>
-  r.withFilter(s2 => s2.region == b)
-   .withFilter(s2 => Math.abs(s1.magnitud - s2.magnitud) <= dif)
-   .map(s2 => (s1, s2)))
-```
-
-**`paresCercanos`, el `for` externo**
-
-Tiene dos generadores, una guardia, una definición (`cercanos = ...`) y otra guardia. Es equivalente a:
-
-```scala
-indexadas.flatMap { case (a, i) =>
-  indexadas
-    .withFilter { case (b, j) => i < j }
-    .map { case (b, j) =>
-      val cercanos = /* el for interno */
-      (b, cercanos)
-    }
-    .withFilter { case (b, cercanos) => cercanos.nonEmpty }
-    .map { case (b, _) => (a, b) }
-}
-```
-
-La definición `cercanos = ...` se convierte en un `val` dentro de un `map`, y la guardia siguiente filtra sobre ese valor. El patrón de tupla `(a, i) <- indexadas` puede añadir un `withFilter` que deja pasar todo, porque toda tupla cumple el patrón.
-
-### Ejecución paso a paso: `fuertes(registro, 5.0)`
-
-| Posición | Sismo | Magnitud | ¿Mayor que 5.0? | Aporta |
-|:---:|---|:---:|:---:|---|
-| 1 | Valle | 4.2 | No | — |
-| 2 | Santander | 5.1 | Sí | "Santander" |
-| 3 | Valle | 3.8 | No | — |
-| 4 | Choco | 6.0 | Sí | "Choco" |
-| 5 | Santander | 4.7 | No | — |
-| 6 | Valle | 5.3 | Sí | "Valle" |
-| 7 | Choco | 3.1 | No | — |
-
-Resultado: `List("Santander", "Choco", "Valle")`.
-
-Con umbral `6.0` el sismo de Choco (magnitud exacta 6.0) no entra, porque la comparación es estricta. Con umbral `9.0` ningún sismo pasa y el resultado es `List()`.
-
-### Ejecución paso a paso: `enRegion(registro, "Valle")`
-
-| Posición | Región | ¿Es "Valle"? | Aporta |
-|:---:|---|:---:|:---:|
-| 1 | Valle | Sí | 4.2 |
-| 2 | Santander | No | — |
-| 3 | Valle | Sí | 3.8 |
-| 4 | Choco | No | — |
-| 5 | Santander | No | — |
-| 6 | Valle | Sí | 5.3 |
-| 7 | Choco | No | — |
-
-Resultado: `List(4.2, 3.8, 5.3)`.
-
-Caso borde, `enRegion(registro, "Amazonas")`: ningún sismo cumple la guardia y el resultado es `List()`. Con el registro vacío tampoco hay elementos que recorrer, y el resultado es `List()`.
-
-### Ejecución paso a paso: `paresCercanos(registro, 0.6)`
-
-1. `regiones` es `List("Valle", "Santander", "Choco")`, en el orden en que aparece cada una por primera vez.
-2. `indexadas` es `List(("Valle",0), ("Santander",1), ("Choco",2))`.
-3. Los dos generadores producen las 9 combinaciones $(a, b)$. La guardia `i < j` deja solo tres:
-
-   | Pareja | Magnitudes de $a$ | Magnitudes de $b$ | Menor diferencia | ¿Es $\le 0.6$? | ¿Sale? |
-      |---|---|---|:---:|:---:|:---:|
-   | (Valle, Santander) | 4.2, 3.8, 5.3 | 5.1, 4.7 | 0.2 (5.3 y 5.1) | Sí | Sí |
-   | (Valle, Choco) | 4.2, 3.8, 5.3 | 6.0, 3.1 | 0.7 (5.3 y 6.0, o 3.8 y 3.1) | No | No |
-   | (Santander, Choco) | 5.1, 4.7 | 6.0, 3.1 | 0.9 (5.1 y 6.0) | No | No |
-
-Resultado: `List(("Valle", "Santander"))`.
-
-Con `dif = 1.0` las tres parejas cumplen la condición y salen en el orden `(Valle, Santander)`, `(Valle, Choco)`, `(Santander, Choco)`. Con `dif = 0.1` ninguna cumple y el resultado es `List()`.
-
-Caso borde: con una sola región, `indexadas` tiene un solo elemento, no existe ningún par con `i < j` y el resultado es `List()`.
-
-### Diagramas
-
-Orden en que `fuertes(registro, 5.0)` pide y descarta los sismos:
-
-```mermaid
-sequenceDiagram
-    participant F as for con yield
-    participant W as withFilter
-    participant M as map
-    F->>W: sismo 1, magnitud 4.2
-    W-->>F: no pasa, 4.2 no es mayor que 5.0
-    F->>W: sismo 2, magnitud 5.1
-    W->>M: pasa
-    M-->>F: Santander
-    F->>W: sismo 3, magnitud 3.8
-    W-->>F: no pasa
-    F->>W: sismo 4, magnitud 6.0
-    W->>M: pasa
-    M-->>F: Choco
-    F->>W: sismos 5 y 7 no pasan
-    F->>W: sismo 6, magnitud 5.3
-    W->>M: pasa
-    M-->>F: Valle
-```
-
-Flujo de `paresCercanos`:
-
-```mermaid
-flowchart TD
-    A["r: Registro"] --> B["regiones: regiones sin repetir en orden de aparicion"]
-    B --> C["indexadas: cada region con su indice"]
-    C --> D["generar (a,i) y (b,j)"]
-    D --> E{"i menor que j ?"}
-    E -- no --> X["descartar"]
-    E -- si --> F["cercanos: pares (s1,s2) de regiones a y b con diferencia menor o igual que dif"]
-    F --> G{"cercanos no vacio ?"}
-    G -- no --> X
-    G -- si --> H["yield (a, b)"]
-```
-
-### Observaciones
-
-* Las tres consultas dicen **qué** se busca (sismos que pasan una guardia, parejas con una propiedad) y no **cómo** recorrer el registro.
-* El orden de salida lo fija el orden del registro: `fuertes` y `enRegion` respetan el orden de los sismos, y `paresCercanos` el orden de primera aparición de las regiones.
-* La comparación `Math.abs(...) <= dif` es sobre `Double`. En los ejemplos las diferencias relevantes (0.2, 0.7 y 0.9) quedan lejos de los valores de `dif` usados, así que el redondeo de punto flotante no cambia el resultado.
-
-# Informe de proceso
-
-Fundamentos de Programación Funcional y Concurrente.
-Taller 3: consultas sobre un registro sísmico.
-
-## Punto 1: consultas con expresiones for
-
-### Código
-
-```scala
-def fuertes(r: Registro, umbral: Double): List[String] =
-  for {
-    s <- r
-    if s.magnitud > umbral
-  } yield s.region
-
-def enRegion(r: Registro, region: String): List[Double] =
-  for {
-    s <- r
-    if s.region == region
-  } yield s.magnitud
-
-def paresCercanos(r: Registro, dif: Double): List[(String, String)] = {
-  val regiones = (for (s <- r) yield s.region).distinct
-  val indexadas = regiones.zipWithIndex
-
-  for {
-    (a, i) <- indexadas
-    (b, j) <- indexadas
-    if i < j
-    cercanos = for {
-      s1 <- r if s1.region == a
-      s2 <- r if s2.region == b
-      if Math.abs(s1.magnitud - s2.magnitud) <= dif
-    } yield (s1, s2)
-    if cercanos.nonEmpty
-  } yield (a, b)
-}
-```
-
-Las tres consultas son expresiones `for` con `yield`. No hay `var`, `while` ni `return`, y las funciones auxiliares (`regiones`, `indexadas`, `cercanos`) viven dentro de `paresCercanos`.
-
-### Qué hace cada función
-
-* `fuertes` recorre el registro, descarta los sismos cuya magnitud no supera el umbral y devuelve la región de los que quedan. No se quitan repetidos, así que una región con dos sismos fuertes aparece dos veces, en el orden del registro.
-* `enRegion` recorre el registro, se queda con los sismos de la región pedida y devuelve sus magnitudes. Si la región no está, ningún sismo pasa la guardia y el resultado es `List()`.
-* `paresCercanos` hace cuatro cosas:
-    * Calcula las regiones sin repetir, en orden de primera aparición (`regiones`).
-    * Les pone un índice con `zipWithIndex`.
-    * Forma todas las combinaciones de dos regiones y se queda solo con las que cumplen `i < j`. Así una región nunca se empareja consigo misma y cada pareja sale una sola vez.
-    * Deja pasar la pareja solo si existe algún par de sismos, uno de cada región, con magnitudes que difieren a lo sumo `dif`. Eso lo decide el `for` interno (`cercanos`).
-
-### Expresiones `for`: en qué se traducen
-
-El compilador traduce todo `for` a `map`, `flatMap` y `withFilter` con estas reglas:
-
-* Un generador con `yield`: `for (x <- c) yield e` se traduce a `c.map(x => e)`.
-* Un generador con guardia: `for (x <- c if p) yield e` se traduce a `c.withFilter(x => p).map(x => e)`.
-* Varios generadores: todos menos el último se traducen a `flatMap`, y el último a `map`.
-
-**`fuertes`**
-
-```scala
-r.withFilter(s => s.magnitud > umbral).map(s => s.region)
-```
-
-**`enRegion`**
-
-```scala
-r.withFilter(s => s.region == region).map(s => s.magnitud)
-```
-
-**`paresCercanos`, regiones sin repetir**
-
-```scala
-r.map(s => s.region).distinct
-```
-
-**`paresCercanos`, el `for` interno (`cercanos`)**
-
-```scala
-r.withFilter(s1 => s1.region == a).flatMap(s1 =>
-  r.withFilter(s2 => s2.region == b)
-   .withFilter(s2 => Math.abs(s1.magnitud - s2.magnitud) <= dif)
-   .map(s2 => (s1, s2)))
-```
-
-**`paresCercanos`, el `for` externo**
-
-Tiene dos generadores, una guardia, una definición (`cercanos = ...`) y otra guardia. Es equivalente a:
-
-```scala
-indexadas.flatMap { case (a, i) =>
-  indexadas
-    .withFilter { case (b, j) => i < j }
-    .map { case (b, j) =>
-      val cercanos = /* el for interno */
-      (b, cercanos)
-    }
-    .withFilter { case (b, cercanos) => cercanos.nonEmpty }
-    .map { case (b, _) => (a, b) }
-}
-```
-
-La definición `cercanos = ...` se convierte en un `val` dentro de un `map`, y la guardia siguiente filtra sobre ese valor. El patrón de tupla `(a, i) <- indexadas` puede añadir un `withFilter` que deja pasar todo, porque toda tupla cumple el patrón.
-
-### Ejecución paso a paso: `fuertes(registro, 5.0)`
-
-| Posición | Sismo | Magnitud | ¿Mayor que 5.0? | Aporta |
-|:---:|---|:---:|:---:|---|
-| 1 | Valle | 4.2 | No | — |
-| 2 | Santander | 5.1 | Sí | "Santander" |
-| 3 | Valle | 3.8 | No | — |
-| 4 | Choco | 6.0 | Sí | "Choco" |
-| 5 | Santander | 4.7 | No | — |
-| 6 | Valle | 5.3 | Sí | "Valle" |
-| 7 | Choco | 3.1 | No | — |
-
-Resultado: `List("Santander", "Choco", "Valle")`.
-
-Con umbral `6.0` el sismo de Choco (magnitud exacta 6.0) no entra, porque la comparación es estricta. Con umbral `9.0` ningún sismo pasa y el resultado es `List()`.
-
-### Ejecución paso a paso: `enRegion(registro, "Valle")`
-
-| Posición | Región | ¿Es "Valle"? | Aporta |
-|:---:|---|:---:|:---:|
-| 1 | Valle | Sí | 4.2 |
-| 2 | Santander | No | — |
-| 3 | Valle | Sí | 3.8 |
-| 4 | Choco | No | — |
-| 5 | Santander | No | — |
-| 6 | Valle | Sí | 5.3 |
-| 7 | Choco | No | — |
-
-Resultado: `List(4.2, 3.8, 5.3)`.
-
-Caso borde, `enRegion(registro, "Amazonas")`: ningún sismo cumple la guardia y el resultado es `List()`. Con el registro vacío tampoco hay elementos que recorrer, y el resultado es `List()`.
-
-### Ejecución paso a paso: `paresCercanos(registro, 0.6)`
-
-1. `regiones` es `List("Valle", "Santander", "Choco")`, en el orden en que aparece cada una por primera vez.
-2. `indexadas` es `List(("Valle",0), ("Santander",1), ("Choco",2))`.
-3. Los dos generadores producen las 9 combinaciones $(a, b)$. La guardia `i < j` deja solo tres:
-
-   | Pareja | Magnitudes de $a$ | Magnitudes de $b$ | Menor diferencia | ¿Es $\le 0.6$? | ¿Sale? |
-      |---|---|---|:---:|:---:|:---:|
-   | (Valle, Santander) | 4.2, 3.8, 5.3 | 5.1, 4.7 | 0.2 (5.3 y 5.1) | Sí | Sí |
-   | (Valle, Choco) | 4.2, 3.8, 5.3 | 6.0, 3.1 | 0.7 (5.3 y 6.0, o 3.8 y 3.1) | No | No |
-   | (Santander, Choco) | 5.1, 4.7 | 6.0, 3.1 | 0.9 (5.1 y 6.0) | No | No |
-
-Resultado: `List(("Valle", "Santander"))`.
-
-Con `dif = 1.0` las tres parejas cumplen la condición y salen en el orden `(Valle, Santander)`, `(Valle, Choco)`, `(Santander, Choco)`. Con `dif = 0.1` ninguna cumple y el resultado es `List()`.
-
-Caso borde: con una sola región, `indexadas` tiene un solo elemento, no existe ningún par con `i < j` y el resultado es `List()`.
-
-### Diagramas
-
-Orden en que `fuertes(registro, 5.0)` pide y descarta los sismos:
-
-```mermaid
-sequenceDiagram
-    participant F as for con yield
-    participant W as withFilter
-    participant M as map
-    F->>W: sismo 1, magnitud 4.2
-    W-->>F: no pasa, 4.2 no es mayor que 5.0
-    F->>W: sismo 2, magnitud 5.1
-    W->>M: pasa
-    M-->>F: Santander
-    F->>W: sismo 3, magnitud 3.8
-    W-->>F: no pasa
-    F->>W: sismo 4, magnitud 6.0
-    W->>M: pasa
-    M-->>F: Choco
-    F->>W: sismos 5 y 7 no pasan
-    F->>W: sismo 6, magnitud 5.3
-    W->>M: pasa
-    M-->>F: Valle
-```
-
-Flujo de `paresCercanos`:
-
-```mermaid
-flowchart TD
-    A["r: Registro"] --> B["regiones: regiones sin repetir en orden de aparicion"]
-    B --> C["indexadas: cada region con su indice"]
-    C --> D["generar (a,i) y (b,j)"]
-    D --> E{"i menor que j ?"}
-    E -- no --> X["descartar"]
-    E -- si --> F["cercanos: pares (s1,s2) de regiones a y b con diferencia menor o igual que dif"]
-    F --> G{"cercanos no vacio ?"}
-    G -- no --> X
-    G -- si --> H["yield (a, b)"]
 ```
 
